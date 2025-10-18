@@ -55,21 +55,50 @@
     <div class="footer">Verzió: 3.1 • Fix sorrend: UTG / HJ / CO / BTN / SB / BB • Teljes csomag (képekkel)</div>
   </div>
 
+  <!-- Load manifest.js for offline/file:// support -->
+  <script src="manifest.js"></script>
+
   <script>
-    const MANIFEST = {"BU": {"Open": ["6-Max Rangek/BU/Open/BU Open.png"]}, "CO": {"Open": ["6-Max Rangek/CO/Open/CO Open.png"]}, "HJ": {"Open": ["6-Max Rangek/HJ/Open/HJ Open.png"]}, "LJ": {"Open": ["6-Max Rangek/LJ/Open/LJ Open.png"]}, "SB": {"Open": ["6-Max Rangek/SB/Open/SB Open.png"]}};              // keys: folder POS (e.g., LJ, HJ, CO, BU, SB)
+    let MANIFEST = null;              // keys: folder POS (e.g., LJ, HJ, CO, BU, SB)
     const POS_DISPLAY = {"LJ": "UTG", "HJ": "HJ", "CO": "CO", "BU": "BTN", "SB": "SB", "BB": "BB"};            // folder -> display label
     const ORDER_DISPLAY = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];            // desired display order
     const DISPLAY_TO_FOLDER = {"UTG": "LJ", "HJ": "HJ", "CO": "CO", "BTN": "BU", "SB": "SB", "BB": "BB"};       // display -> folder key
-
-    // Collect stacks actually present
-    const stackSet = new Set();
-    Object.keys(MANIFEST).forEach(pos => { Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); });
-    const stacks = Array.from(stackSet).sort();
 
     const stackSel = document.getElementById('stack');
     const modeSel = document.getElementById('mode');
     const grid = document.getElementById('posGrid');
     const previewImg = document.getElementById('previewImg');
+
+    // Load manifest: try manifest.json first (HTTP/HTTPS), fall back to window.__CHART_MANIFEST__ (file://)
+    async function loadManifest() {
+      try {
+        const response = await fetch('manifest.json');
+        if (response.ok) {
+          MANIFEST = await response.json();
+          console.log('Loaded manifest.json');
+          return;
+        }
+      } catch (err) {
+        console.log('Failed to fetch manifest.json, using inline manifest.js:', err.message);
+      }
+      
+      // Fall back to inline manifest.js
+      if (window.__CHART_MANIFEST__) {
+        MANIFEST = window.__CHART_MANIFEST__;
+        console.log('Using inline manifest.js');
+      } else {
+        console.error('No manifest available!');
+        MANIFEST = {};
+      }
+    }
+
+    async function initialize() {
+      await loadManifest();
+
+      // Collect stacks actually present
+      const stackSet = new Set();
+      Object.keys(MANIFEST).forEach(pos => { Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); });
+      const stacks = Array.from(stackSet).sort();
 
     // Populate stacks
     stacks.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; stackSel.appendChild(o); });
@@ -149,6 +178,10 @@
       const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
       if (MANIFEST[folderKey] && MANIFEST[folderKey][stackSel.value]){ showByFolder(folderKey); break; }
     }
+    }
+
+    // Initialize when page loads
+    initialize();
   </script>
 </body>
 </html>
