@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>6-Max CG – Preflop Chart (Teljes csomag, fix sorrend)</title>
+  <style>
+    :root{--bg:#0b0e14;--card:#121826;--muted:#9aa4b2;--text:#e6e8eb;--accent:#3b82f6;--border:#263041;}
+    *{box-sizing:border-box}html,body{height:100%}body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,Apple Color Emoji,Segoe UI Emoji;background:var(--bg);color:var(--text);}
+    .container{max-width:1200px;margin:0 auto;padding:24px 16px;display:flex;flex-direction:column;gap:16px;}
+    .toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--border);padding:12px;border-radius:12px;}
+    label{font-size:14px;color:var(--muted);margin-right:6px;}
+    select{background:#0f1522;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 12px;outline:none;}
+    .preview-wrap{position:relative;width:100%;height:520px;background:#000;border:1px solid var(--border);border-radius:14px;overflow:hidden;}
+    .preview-hint{position:absolute;top:12px;left:12px;font-size:12px;color:var(--muted);background:rgba(0,0,0,.35);padding:6px 8px;border-radius:8px;pointer-events:none;user-select:none;}
+    .preview{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;}
+    .preview img{max-width:100%;max-height:100%;width:auto;height:auto;display:block;image-rendering:-webkit-optimize-contrast;image-rendering:crisp-edges;-ms-interpolation-mode:nearest-neighbor;}
+    .grid{display:grid;grid-template-columns:repeat(3, minmax(160px,1fr));gap:12px;}
+    .row{display:contents;}
+    .cell{position:relative;padding:18px 14px;background:var(--card);border:1px solid var(--border);border-radius:14px;text-align:center;cursor:pointer;transition:transform .08s ease-out, border-color .15s ease;user-select:none;min-height:84px;}
+    .cell:hover,.cell:focus{transform:translateY(-1px);border-color:var(--accent);outline:none;}
+    .cell.disabled{opacity:.45;cursor:not-allowed;}
+    .cell .pos{display:block;font-weight:700;letter-spacing:.5px;font-size:18px;margin-bottom:6px;color:#fff;}
+    .cell .desc{font-size:12px;color:var(--muted);}
+    .footer{color:var(--muted);font-size:12px;text-align:center;margin-top:6px;}
+    @media (max-width:900px){.grid{grid-template-columns:repeat(2, minmax(160px,1fr))}}
+    @media (max-width:600px){.grid{grid-template-columns:repeat(2, minmax(140px,1fr))}.preview-wrap{height:360px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="toolbar" aria-label="Szűrők">
+      <div>
+        <label for="stack">Stack:</label>
+        <select id="stack" name="stack"></select>
+      </div>
+      <div>
+        <label for="mode">Megjelenítés:</label>
+        <select id="mode" name="mode">
+          <option value="hover" selected>Hover (egér fölé)</option>
+          <option value="click">Klikkre rögzít</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="preview-wrap" role="region" aria-label="Range előnézet">
+      <div class="preview-hint">Vidd az egeret egy pozíció fölé (vagy kattints), a kép itt jelenik meg. A hely fix, nem mozog a layout.</div>
+      <div class="preview">
+        <img id="previewImg" alt="Válassz pozíciót a megjelenítéshez" />
+      </div>
+    </div>
+
+    <div class="grid" id="posGrid" aria-label="Pozíciók"></div>
+
+    <div class="footer">Verzió: 3.1 • Fix sorrend: UTG / HJ / CO / BTN / SB / BB • Teljes csomag (képekkel)</div>
+  </div>
+
+  <script>
+    const MANIFEST = {"BU": {"Open": ["6-Max Rangek/BU/Open/BU Open.png"]}, "CO": {"Open": ["6-Max Rangek/CO/Open/CO Open.png"]}, "HJ": {"Open": ["6-Max Rangek/HJ/Open/HJ Open.png"]}, "LJ": {"Open": ["6-Max Rangek/LJ/Open/LJ Open.png"]}, "SB": {"Open": ["6-Max Rangek/SB/Open/SB Open.png"]}};              // keys: folder POS (e.g., LJ, HJ, CO, BU, SB)
+    const POS_DISPLAY = {"LJ": "UTG", "HJ": "HJ", "CO": "CO", "BU": "BTN", "SB": "SB", "BB": "BB"};            // folder -> display label
+    const ORDER_DISPLAY = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];            // desired display order
+    const DISPLAY_TO_FOLDER = {"UTG": "LJ", "HJ": "HJ", "CO": "CO", "BTN": "BU", "SB": "SB", "BB": "BB"};       // display -> folder key
+
+    // Collect stacks actually present
+    const stackSet = new Set();
+    Object.keys(MANIFEST).forEach(pos => { Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); });
+    const stacks = Array.from(stackSet).sort();
+
+    const stackSel = document.getElementById('stack');
+    const modeSel = document.getElementById('mode');
+    const grid = document.getElementById('posGrid');
+    const previewImg = document.getElementById('previewImg');
+
+    // Populate stacks
+    stacks.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; stackSel.appendChild(o); });
+    if (stacks.length === 0){ const o = document.createElement('option'); o.value = ''; o.textContent = 'Nincs stack'; stackSel.appendChild(o); }
+
+    function firstImage(folderKey, stack){
+      const list = (MANIFEST[folderKey] && MANIFEST[folderKey][stack]) || [];
+      return list.length ? list[0] : '';
+    }
+
+    function showByFolder(folderKey){
+      const stack = stackSel.value;
+      const src = firstImage(folderKey, stack);
+      if(!src) return;
+      previewImg.src = src;
+      const label = POS_DISPLAY[folderKey] || folderKey;
+      previewImg.alt = label + ' – ' + stack + ' range';
+    }
+
+    let clickPinned = false;
+    let pinnedFolder = null;
+
+    function handleEnter(el){
+      if(modeSel.value === 'hover' && !clickPinned && !el.classList.contains('disabled')){
+        showByFolder(el.dataset.folder);
+      }
+    }
+    function handleClick(el){
+      if(el.classList.contains('disabled')) return;
+      const folder = el.dataset.folder;
+      if(modeSel.value === 'click'){
+        clickPinned = true;
+        pinnedFolder = folder;
+        showByFolder(folder);
+      } else {
+        showByFolder(folder);
+      }
+    }
+    modeSel.addEventListener('change', ()=>{ if(modeSel.value === 'hover'){ clickPinned=false; pinnedFolder=null; }});
+
+    function renderGrid(){
+      grid.innerHTML = '';
+      const stack = stackSel.value;
+      ORDER_DISPLAY.forEach(displayName => {
+        const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
+        const exists = MANIFEST[folderKey] && MANIFEST[folderKey][stack];
+        const btn = document.createElement('button');
+        btn.className = 'cell' + (exists ? '' : ' disabled');
+        btn.dataset.folder = folderKey;
+        btn.tabIndex = exists ? 0 : -1;
+
+        const posSpan = document.createElement('span');
+        posSpan.className = 'pos';
+        posSpan.textContent = displayName;
+        const descSpan = document.createElement('span');
+        descSpan.className = 'desc';
+        descSpan.textContent = exists ? stack : 'nincs kép';
+
+        btn.appendChild(posSpan);
+        btn.appendChild(descSpan);
+
+        btn.addEventListener('mouseenter', ()=>handleEnter(btn));
+        btn.addEventListener('click', ()=>handleClick(btn));
+        btn.addEventListener('keydown', (e)=>{ if(!btn.classList.contains('disabled') && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); handleClick(btn);} });
+
+        grid.appendChild(btn);
+      });
+    }
+
+    stackSel.addEventListener('change', renderGrid);
+
+    // Init
+    if (stacks.length) stackSel.value = stacks[0];
+    renderGrid();
+    // Default show first available in the fixed order
+    for (const displayName of ORDER_DISPLAY){
+      const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
+      if (MANIFEST[folderKey] && MANIFEST[folderKey][stackSel.value]){ showByFolder(folderKey); break; }
+    }
+  </script>
+</body>
+</html>
