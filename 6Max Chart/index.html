@@ -11,6 +11,9 @@
     .toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--border);padding:12px;border-radius:12px;}
     label{font-size:14px;color:var(--muted);margin-right:6px;}
     select{background:#0f1522;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 12px;outline:none;}
+    button.load-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:8px 16px;font-size:14px;cursor:pointer;transition:opacity .15s ease;}
+    button.load-btn:hover{opacity:.9;}
+    button.load-btn:disabled{opacity:.5;cursor:not-allowed;}
     .preview-wrap{position:relative;width:100%;height:520px;background:#000;border:1px solid var(--border);border-radius:14px;overflow:hidden;}
     .preview-hint{position:absolute;top:12px;left:12px;font-size:12px;color:var(--muted);background:rgba(0,0,0,.35);padding:6px 8px;border-radius:8px;pointer-events:none;user-select:none;}
     .preview{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;}
@@ -26,6 +29,7 @@
     @media (max-width:900px){.grid{grid-template-columns:repeat(2, minmax(160px,1fr))}}
     @media (max-width:600px){.grid{grid-template-columns:repeat(2, minmax(140px,1fr))}.preview-wrap{height:360px}}
   </style>
+  <script src="manifest.js"></script>
 </head>
 <body>
   <div class="container">
@@ -41,6 +45,9 @@
           <option value="click">Klikkre rögzít</option>
         </select>
       </div>
+      <div>
+        <button id="loadFolder" class="load-btn" style="display:none;">📁 Mappa betöltése</button>
+      </div>
     </div>
 
     <div class="preview-wrap" role="region" aria-label="Range előnézet">
@@ -52,28 +59,131 @@
 
     <div class="grid" id="posGrid" aria-label="Pozíciók"></div>
 
-    <div class="footer">Verzió: 3.1 • Fix sorrend: UTG / HJ / CO / BTN / SB / BB • Teljes csomag (képekkel)</div>
+    <div class="footer">Verzió: 4.0 • Fix sorrend: UTG / HJ / CO / BTN / SB / BB • Teljes offline támogatás</div>
   </div>
 
   <script>
-    const MANIFEST = {"BU": {"Open": ["6-Max Rangek/BU/Open/BU Open.png"]}, "CO": {"Open": ["6-Max Rangek/CO/Open/CO Open.png"]}, "HJ": {"Open": ["6-Max Rangek/HJ/Open/HJ Open.png"]}, "LJ": {"Open": ["6-Max Rangek/LJ/Open/LJ Open.png"]}, "SB": {"Open": ["6-Max Rangek/SB/Open/SB Open.png"]}};              // keys: folder POS (e.g., LJ, HJ, CO, BU, SB)
+    // Three-tier manifest loading strategy
+    let MANIFEST = {"BU": {"Open": ["6-Max Rangek/BU/Open/BU Open.png"]}, "CO": {"Open": ["6-Max Rangek/CO/Open/CO Open.png"]}, "HJ": {"Open": ["6-Max Rangek/HJ/Open/HJ Open.png"]}, "LJ": {"Open": ["6-Max Rangek/LJ/Open/LJ Open.png"]}, "SB": {"Open": ["6-Max Rangek/SB/Open/SB Open.png"]}};              // Minimal fallback
+    let imageObjectURLs = {};  // Store blob URLs for loaded images
+    
     const POS_DISPLAY = {"LJ": "UTG", "HJ": "HJ", "CO": "CO", "BU": "BTN", "SB": "SB", "BB": "BB"};            // folder -> display label
     const ORDER_DISPLAY = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];            // desired display order
     const DISPLAY_TO_FOLDER = {"UTG": "LJ", "HJ": "HJ", "CO": "CO", "BTN": "BU", "SB": "SB", "BB": "BB"};       // display -> folder key
-
-    // Collect stacks actually present
-    const stackSet = new Set();
-    Object.keys(MANIFEST).forEach(pos => { Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); });
-    const stacks = Array.from(stackSet).sort();
 
     const stackSel = document.getElementById('stack');
     const modeSel = document.getElementById('mode');
     const grid = document.getElementById('posGrid');
     const previewImg = document.getElementById('previewImg');
+    const loadFolderBtn = document.getElementById('loadFolder');
 
-    // Populate stacks
-    stacks.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; stackSel.appendChild(o); });
-    if (stacks.length === 0){ const o = document.createElement('option'); o.value = ''; o.textContent = 'Nincs stack'; stackSel.appendChild(o); }
+    // Load manifest based on context
+    async function loadManifest() {
+      const isFile = location.protocol === 'file:';
+      
+      // Tier 1: Check if manifest.js was loaded (offline with embedded manifest)
+      if (window.__CHART_MANIFEST__) {
+        console.log('Using embedded manifest from manifest.js');
+        MANIFEST = window.__CHART_MANIFEST__;
+        return true;
+      }
+      
+      // Tier 2: Try to fetch manifest.json (HTTP server scenario)
+      if (!isFile) {
+        try {
+          const response = await fetch('manifest.json', { cache: 'no-store' });
+          if (response.ok) {
+            MANIFEST = await response.json();
+            console.log('Loaded manifest.json from server');
+            return true;
+          }
+        } catch (e) {
+          console.warn('Failed to fetch manifest.json:', e);
+        }
+      }
+      
+      // Tier 3: Use minimal fallback (already set)
+      console.log('Using minimal fallback manifest');
+      
+      // Show "Mappa betöltése" button if File System Access API is available and we're offline
+      if (isFile && 'showDirectoryPicker' in window) {
+        loadFolderBtn.style.display = 'block';
+      }
+      
+      return false;
+    }
+
+    // Load images from user-selected directory using File System Access API
+    async function loadFromDirectory() {
+      try {
+        const dirHandle = await window.showDirectoryPicker({
+          id: '6max-chart-rangek',
+          mode: 'read',
+          startIn: 'documents'
+        });
+        
+        console.log('Loading images from:', dirHandle.name);
+        
+        // Recursively scan the directory
+        const newManifest = {};
+        await scanDirectory(dirHandle, newManifest, []);
+        
+        if (Object.keys(newManifest).length > 0) {
+          MANIFEST = newManifest;
+          console.log('Loaded manifest from directory:', MANIFEST);
+          updateUI();
+          loadFolderBtn.textContent = '✓ Mappa betöltve';
+          loadFolderBtn.disabled = true;
+        } else {
+          alert('Nem találhatók képek a kiválasztott mappában.\n\nKérlek válaszd ki a "6-Max Rangek" mappát, ami tartalmazza a pozíció almappákat (LJ, HJ, CO, BU, SB, BB).');
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          console.error('Error loading directory:', e);
+          alert('Hiba a mappa betöltése közben: ' + e.message);
+        }
+      }
+    }
+
+    // Recursively scan directory for images
+    async function scanDirectory(dirHandle, manifest, pathParts) {
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.png')) {
+          // Parse position and stack from path
+          // Expected: position/stack/file.png or just position/file.png
+          if (pathParts.length >= 1) {
+            const position = pathParts[0];
+            const stack = pathParts.length >= 2 ? pathParts[1] : 'Open';
+            
+            if (!manifest[position]) {
+              manifest[position] = {};
+            }
+            if (!manifest[position][stack]) {
+              manifest[position][stack] = [];
+            }
+            
+            // Get file and create object URL
+            const file = await entry.getFile();
+            const objectURL = URL.createObjectURL(file);
+            const virtualPath = pathParts.concat(entry.name).join('/');
+            
+            manifest[position][stack].push(virtualPath);
+            imageObjectURLs[virtualPath] = objectURL;
+          }
+        } else if (entry.kind === 'directory') {
+          await scanDirectory(entry, manifest, pathParts.concat(entry.name));
+        }
+      }
+    }
+
+    // Collect stacks actually present
+    function getAvailableStacks() {
+      const stackSet = new Set();
+      Object.keys(MANIFEST).forEach(pos => { 
+        Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); 
+      });
+      return Array.from(stackSet).sort();
+    }
 
     function firstImage(folderKey, stack){
       const list = (MANIFEST[folderKey] && MANIFEST[folderKey][stack]) || [];
@@ -84,7 +194,11 @@
       const stack = stackSel.value;
       const src = firstImage(folderKey, stack);
       if(!src) return;
-      previewImg.src = src;
+      
+      // Use object URL if available (from directory picker), otherwise use path
+      const displaySrc = imageObjectURLs[src] || src;
+      previewImg.src = displaySrc;
+      
       const label = POS_DISPLAY[folderKey] || folderKey;
       previewImg.alt = label + ' – ' + stack + ' range';
     }
@@ -139,16 +253,43 @@
       });
     }
 
-    stackSel.addEventListener('change', renderGrid);
-
-    // Init
-    if (stacks.length) stackSel.value = stacks[0];
-    renderGrid();
-    // Default show first available in the fixed order
-    for (const displayName of ORDER_DISPLAY){
-      const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
-      if (MANIFEST[folderKey] && MANIFEST[folderKey][stackSel.value]){ showByFolder(folderKey); break; }
+    function updateUI() {
+      // Update stack dropdown
+      const stacks = getAvailableStacks();
+      stackSel.innerHTML = '';
+      stacks.forEach(s => { 
+        const o = document.createElement('option'); 
+        o.value = s; 
+        o.textContent = s; 
+        stackSel.appendChild(o); 
+      });
+      if (stacks.length === 0) { 
+        const o = document.createElement('option'); 
+        o.value = ''; 
+        o.textContent = 'Nincs stack'; 
+        stackSel.appendChild(o); 
+      }
+      
+      if (stacks.length) stackSel.value = stacks[0];
+      renderGrid();
+      
+      // Default show first available in the fixed order
+      for (const displayName of ORDER_DISPLAY){
+        const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
+        if (MANIFEST[folderKey] && MANIFEST[folderKey][stackSel.value]){ 
+          showByFolder(folderKey); 
+          break; 
+        }
+      }
     }
+
+    stackSel.addEventListener('change', renderGrid);
+    loadFolderBtn.addEventListener('click', loadFromDirectory);
+
+    // Initialize
+    loadManifest().then(() => {
+      updateUI();
+    });
   </script>
 </body>
 </html>
