@@ -14,24 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
+
       - name: Generate manifests
         run: node generate-manifest.js
-        
+
       - name: Check for changes
         id: git-check
         run: |
           git diff --exit-code 6Max\ Chart/manifest.json 6Max\ Chart/manifest.js || echo "changed=true" >> $GITHUB_OUTPUT
-          
+
       - name: Commit and push if changed
         if: steps.git-check.outputs.changed == 'true'
         run: |
