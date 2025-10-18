@@ -1,5 +1,5 @@
 // Auto-generated manifest file - do not edit manually
-// Generated: 2025-10-18T19:04:08.799Z
+// Generated: 2025-10-18T19:09:13.981Z
 window.__CHART_MANIFEST__ = {
   "BU": {
     "Open": [
