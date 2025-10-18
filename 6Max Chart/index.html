@@ -56,24 +56,72 @@
   </div>
 
   <script>
-    const MANIFEST = {"BU": {"Open": ["6-Max Rangek/BU/Open/BU Open.png"]}, "CO": {"Open": ["6-Max Rangek/CO/Open/CO Open.png"]}, "HJ": {"Open": ["6-Max Rangek/HJ/Open/HJ Open.png"]}, "LJ": {"Open": ["6-Max Rangek/LJ/Open/LJ Open.png"]}, "SB": {"Open": ["6-Max Rangek/SB/Open/SB Open.png"]}};              // keys: folder POS (e.g., LJ, HJ, CO, BU, SB)
+    // Configuration constants
     const POS_DISPLAY = {"LJ": "UTG", "HJ": "HJ", "CO": "CO", "BU": "BTN", "SB": "SB", "BB": "BB"};            // folder -> display label
     const ORDER_DISPLAY = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];            // desired display order
     const DISPLAY_TO_FOLDER = {"UTG": "LJ", "HJ": "HJ", "CO": "CO", "BTN": "BU", "SB": "SB", "BB": "BB"};       // display -> folder key
 
-    // Collect stacks actually present
-    const stackSet = new Set();
-    Object.keys(MANIFEST).forEach(pos => { Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); });
-    const stacks = Array.from(stackSet).sort();
+    // Global state
+    let MANIFEST = {};
+    let stacks = [];
+    let clickPinned = false;
+    let pinnedFolder = null;
 
     const stackSel = document.getElementById('stack');
     const modeSel = document.getElementById('mode');
     const grid = document.getElementById('posGrid');
     const previewImg = document.getElementById('previewImg');
 
-    // Populate stacks
-    stacks.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; stackSel.appendChild(o); });
-    if (stacks.length === 0){ const o = document.createElement('option'); o.value = ''; o.textContent = 'Nincs stack'; stackSel.appendChild(o); }
+    // Load manifest and initialize
+    async function loadManifest() {
+      try {
+        const response = await fetch('manifest.json');
+        if (!response.ok) {
+          throw new Error(`Failed to load manifest: ${response.status}`);
+        }
+        MANIFEST = await response.json();
+        
+        // Collect stacks actually present
+        const stackSet = new Set();
+        Object.keys(MANIFEST).forEach(pos => { 
+          Object.keys(MANIFEST[pos]).forEach(s => stackSet.add(s)); 
+        });
+        stacks = Array.from(stackSet).sort();
+        
+        // Populate stacks dropdown
+        stacks.forEach(s => { 
+          const o = document.createElement('option'); 
+          o.value = s; 
+          o.textContent = s; 
+          stackSel.appendChild(o); 
+        });
+        if (stacks.length === 0) { 
+          const o = document.createElement('option'); 
+          o.value = ''; 
+          o.textContent = 'Nincs stack'; 
+          stackSel.appendChild(o); 
+        }
+        
+        // Init
+        if (stacks.length) stackSel.value = stacks[0];
+        renderGrid();
+        
+        // Default show first available in the fixed order
+        for (const displayName of ORDER_DISPLAY){
+          const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
+          if (MANIFEST[folderKey] && MANIFEST[folderKey][stackSel.value]) { 
+            showByFolder(folderKey); 
+            break; 
+          }
+        }
+      } catch (error) {
+        console.error('Error loading manifest:', error);
+        const o = document.createElement('option');
+        o.value = '';
+        o.textContent = 'Hiba: manifest betöltése sikertelen';
+        stackSel.appendChild(o);
+      }
+    }
 
     function firstImage(folderKey, stack){
       const list = (MANIFEST[folderKey] && MANIFEST[folderKey][stack]) || [];
@@ -89,14 +137,12 @@
       previewImg.alt = label + ' – ' + stack + ' range';
     }
 
-    let clickPinned = false;
-    let pinnedFolder = null;
-
     function handleEnter(el){
       if(modeSel.value === 'hover' && !clickPinned && !el.classList.contains('disabled')){
         showByFolder(el.dataset.folder);
       }
     }
+    
     function handleClick(el){
       if(el.classList.contains('disabled')) return;
       const folder = el.dataset.folder;
@@ -108,7 +154,13 @@
         showByFolder(folder);
       }
     }
-    modeSel.addEventListener('change', ()=>{ if(modeSel.value === 'hover'){ clickPinned=false; pinnedFolder=null; }});
+    
+    modeSel.addEventListener('change', ()=>{ 
+      if(modeSel.value === 'hover'){ 
+        clickPinned=false; 
+        pinnedFolder=null; 
+      }
+    });
 
     function renderGrid(){
       grid.innerHTML = '';
@@ -133,7 +185,12 @@
 
         btn.addEventListener('mouseenter', ()=>handleEnter(btn));
         btn.addEventListener('click', ()=>handleClick(btn));
-        btn.addEventListener('keydown', (e)=>{ if(!btn.classList.contains('disabled') && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); handleClick(btn);} });
+        btn.addEventListener('keydown', (e)=>{ 
+          if(!btn.classList.contains('disabled') && (e.key==='Enter'||e.key===' ')){ 
+            e.preventDefault(); 
+            handleClick(btn);
+          } 
+        });
 
         grid.appendChild(btn);
       });
@@ -141,14 +198,8 @@
 
     stackSel.addEventListener('change', renderGrid);
 
-    // Init
-    if (stacks.length) stackSel.value = stacks[0];
-    renderGrid();
-    // Default show first available in the fixed order
-    for (const displayName of ORDER_DISPLAY){
-      const folderKey = DISPLAY_TO_FOLDER[displayName] || displayName;
-      if (MANIFEST[folderKey] && MANIFEST[folderKey][stackSel.value]){ showByFolder(folderKey); break; }
-    }
+    // Load manifest on page load
+    loadManifest();
   </script>
 </body>
 </html>
